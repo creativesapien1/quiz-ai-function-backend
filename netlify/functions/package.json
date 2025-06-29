@@ -1,0 +1,12 @@
+{
+  "name": "quiz-function",
+  "version": "1.0.0",
+  "description": "Netlify serverless function for generating quiz questions.",
+  "main": "index.js",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
