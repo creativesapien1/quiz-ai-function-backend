@@ -24,26 +24,27 @@ const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Use ge
  * @returns {object} An object with statusCode, headers, and body.
  */
 exports.handler = async (event, context) => {
-    // Netlify Functions handle CORS automatically to some extent, but
-    // explicit headers are good practice if you need fine-grained control
-    // For local development, you might still need cors npm package if not using Netlify Dev.
-    // For deployed Netlify functions, Cross-Origin-Allow is handled by Netlify by default for functions.
-    // So, we can remove the res.set('Access-Control-Allow-Origin', '*') part here.
+    // --- START DEBUGGING ADDITIONS ---
+    console.log("Received HTTP Method:", event.httpMethod);
+    console.log("Raw event.body:", event.body); // Log the raw body string
+    // --- END DEBUGGING ADDITIONS ---
 
-    // Netlify functions get parameters from event.queryStringParameters (for GET)
-    // or event.body (for POST).
-    // Ensure the body is parsed if it's JSON.
     let body;
     try {
         body = event.body ? JSON.parse(event.body) : {};
     } catch (e) {
         // If body is not valid JSON, treat it as empty for now
         body = {};
+        console.error("Error parsing JSON body:", e, "Raw body was:", event.body);
     }
 
+    // --- START DEBUGGING ADDITIONS ---
+    console.log("Parsed body object:", JSON.stringify(body, null, 2)); // Log the parsed object
+    // --- END DEBUGGING ADDITIONS ---
 
     const category = body.category || event.queryStringParameters.category || 'general knowledge';
     const numQuestions = parseInt(body.numQuestions || event.queryStringParameters.numQuestions || '3');
+    const difficulty = body.difficulty || 'any'; // Default to 'any' if not provided
 
     if (!API_KEY) {
         console.error("GEMINI_API_KEY is not set.");
@@ -55,8 +56,19 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        const prompt = `Generate exactly ${numQuestions} multiple-choice quiz questions about "${category}". For each question, provide the question text, exactly 4 answer options (labeled A, B, C, D), and the correct answer (just the letter A, B, C, or D). Ensure questions and options are unique and clear.
-        
+        let difficultyDescription = "";
+        if (difficulty === "easy") {
+            difficultyDescription = "The questions should be very straightforward, common knowledge, and have obvious correct answers. Avoid obscure topics.";
+        } else if (difficulty === "medium") {
+            difficultyDescription = "The questions should require some general knowledge or logical deduction, but not be overly specialized or obscure.";
+        } else if (difficulty === "hard") {
+            difficultyDescription = "The questions should be challenging, requiring specific knowledge, nuanced understanding, or more complex problem-solving. Include less common facts.";
+        } else { // Handle 'any' difficulty or unhandled cases
+            difficultyDescription = "The questions should be of mixed or general difficulty.";
+        }
+
+        const prompt = `Generate exactly ${numQuestions} multiple-choice quiz questions about "${category}". ${difficultyDescription} Ensure each question and its options are unique and not repeated from previous requests. Provide exactly 4 answer options (labeled A, B, C, D) for each question.
+
         Format the output strictly as a JSON array of objects, like this:
         [
           {
@@ -65,12 +77,14 @@ exports.handler = async (event, context) => {
             "correct_answer_index": 0 // 0 for A, 1 for B, 2 for C, 3 for D
           }
         ]
-        Do not include any other text or formatting. Just the JSON array.`;
+        Do not include any other text or formatting. Just the JSON array.
+        Timestamp for uniqueness: ${Date.now()}`;
 
-        console.log(`Sending prompt to Gemini: ${prompt}`);
+        console.log(`Sending prompt to Gemini: ${prompt}`); // This is the log we'll examine for 'difficulty'
+
         const result = await model.generateContent(prompt);
         const response = result.response;
-        const text = response.text();
+        let text = response.text();
 
         console.log("Raw AI Response:", text);
 
@@ -83,16 +97,16 @@ exports.handler = async (event, context) => {
             console.error("Problematic AI response was:", text);
             return {
                 statusCode: 500,
-                body: JSON.stringify({ error: "Failed to parse AI response. It might not have returned valid JSON.", rawResponse: text }),
+                body: JSON.stringify({ error: "Failed to parse AI response. It might not have returned valid JSON. Try generating again.", rawResponse: text }),
                 headers: { 'Content-Type': 'application/json' }
             };
         }
 
         if (!Array.isArray(quizQuestions) || quizQuestions.some(q =>
-            typeof q.question !== 'string' ||
-            !Array.isArray(q.options) || q.options.length !== 4 ||
-            typeof q.correct_answer_index !== 'number' ||
-            q.correct_answer_index < 0 || q.correct_answer_index > 3
+                typeof q.question !== 'string' ||
+                !Array.isArray(q.options) || q.options.length !== 4 ||
+                typeof q.correct_answer_index !== 'number' ||
+                q.correct_answer_index < 0 || q.correct_answer_index > 3
         )) {
             console.error("AI generated questions in an unexpected format:", quizQuestions);
             return {
